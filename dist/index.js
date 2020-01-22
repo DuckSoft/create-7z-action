@@ -54,20 +54,24 @@ module.exports = require("os");
 /***/ (function(__unusedmodule, __unusedexports, __webpack_require__) {
 
 const core = __webpack_require__(470);
-const wait = __webpack_require__(949);
+const _7z =  __webpack_require__(842);
 
-
-// most @actions toolkit packages have async methods
 async function run() {
   try { 
-    const ms = core.getInput('milliseconds');
-    console.log(`Waiting ${ms} milliseconds ...`)
+    const source = core.getInput('pathSource');
+    const target = core.getInput('pathTarget');
 
-    core.debug((new Date()).toTimeString())
-    wait(parseInt(ms));
-    core.debug((new Date()).toTimeString())
+    core.info("packing " + source + " into " + target);
+    const err = await new Promise((resolve, _) => {
+      _7z.pack(source, target, function(e) {
+        resolve(e);
+      });
+    });
 
-    core.setOutput('time', new Date().toTimeString());
+    if (err !== null) {
+      core.setFailed("create 7z archive failed: " + err);
+      return;
+    }
   } 
   catch (error) {
     core.setFailed(error.message);
@@ -76,6 +80,13 @@ async function run() {
 
 run()
 
+
+/***/ }),
+
+/***/ 129:
+/***/ (function(module) {
+
+module.exports = require("child_process");
 
 /***/ }),
 
@@ -336,6 +347,35 @@ exports.group = group;
 
 /***/ }),
 
+/***/ 587:
+/***/ (function(__unusedmodule, exports, __webpack_require__) {
+
+"use strict";
+
+
+const path = __webpack_require__(622)
+
+function getPath() {
+  if (process.env.USE_SYSTEM_7ZA === "true") {
+    return "7za"
+  }
+
+  if (process.platform === "darwin") {
+    return __webpack_require__.ab + "7za"
+  }
+  else if (process.platform === "win32") {
+    return __webpack_require__.ab + "win/" + process.arch + '/7za.exe'
+  }
+  else {
+    return __webpack_require__.ab + "linux/" + process.arch + '/7za'
+  }
+}
+
+exports.path7za = getPath()
+exports.path7x = __webpack_require__.ab + "7x.sh"
+
+/***/ }),
+
 /***/ 622:
 /***/ (function(module) {
 
@@ -343,20 +383,140 @@ module.exports = require("path");
 
 /***/ }),
 
-/***/ 949:
-/***/ (function(module) {
+/***/ 842:
+/***/ (function(__unusedmodule, exports, __webpack_require__) {
 
-let wait = function(milliseconds) {
-  return new Promise((resolve, reject) => {
-    if (typeof(milliseconds) !== 'number') { 
-      throw new Error('milleseconds not a number'); 
-    }
+"use strict";
 
-    setTimeout(() => resolve("done!"), milliseconds)
-  });
+
+const spawn = __webpack_require__(129).spawn;
+const path7za = __webpack_require__(587).path7za;
+
+/**
+ * Unpack archive.
+ * @param {string} pathToPack - path to archive you want to unpack.
+ * @param {string} destPath - destination path. Where to unpack.
+ * @param {function} cb - callback function. Will be called once unpack is done. If no errors, first parameter will contain `null`
+ */
+function unpack(pathToPack, destPath, cb) {
+    run(path7za, ['x', pathToPack, '-y', '-o' + destPath], cb);
 }
 
-module.exports = wait;
+/**
+ * Pack file or folder to archive.
+ * @param {string} pathToSrc - path to file or folder you want to compress.
+ * @param {string} pathToDest - path to archive you want to create.
+ * @param {function} cb - callback function. Will be called once pack is done. If no errors, first parameter will contain `null`.
+ */
+function pack(pathToSrc, pathToDest, cb) {
+    run(path7za, ['a', pathToDest, pathToSrc], cb);
+}
+
+/**
+ * Get an array with compressed file contents.
+ * @param {string} pathToSrc - path to file its content you want to list.
+ * @param {function} cb - callback function. Will be called once list is done. If no errors, first parameter will contain `null`.
+ */
+function list(pathToSrc, cb) {
+    run(path7za, ['l', pathToSrc], cb);
+}
+
+/**
+ * Run 7za with parameters specified in `paramsArr`.
+ * @param {array} paramsArr - array of parameter. Each array item is one parameter.
+ * @param {function} cb - callback function. Will be called once command is done. If no errors, first parameter will contain `null`. If no output, second parameter will be `null`.
+ */
+function cmd(paramsArr, cb) {
+    run(path7za, paramsArr, cb);
+}
+
+function run(bin, args, cb) {
+    cb = onceify(cb);
+    const proc = spawn(bin, args);
+    let output = '';
+    proc.on('error', function (err) {
+        cb(err);
+    });
+    proc.on('exit', function (code) {
+        let result = null;
+        if (args[0] === 'l') {
+            result = parseListCmd(output);
+        }
+        cb(code ? new Error('Exited with code ' + code) : null, result);
+    });
+    proc.stdout.on('data', (chunk) => {
+        output += chunk.toString();
+    });
+}
+
+// http://stackoverflow.com/questions/30234908/javascript-v8-optimisation-and-leaking-arguments
+// javascript V8 optimisation and “leaking arguments”
+// making callback to be invoked only once
+function onceify(fn) {
+    let called = false;
+    return function () {
+        if (called) return;
+        called = true;
+        fn.apply(this, Array.prototype.slice.call(arguments)) // slice arguments
+    }
+}
+
+function parseListCmd(output) {
+    const regex = /(?:(\d{4}-\d{2}-\d{2}) +(\d{2}:\d{2}:\d{2}) +((?:[D.]){1}(?:[R.]){1}(?:[H.]){1}(?:[S.]){1}(?:[A.]){1}) +(\d{1,12}) +(\d{1,12}) +(.+))\n*/g;
+    let result = [];
+    let m;
+    while ((m = regex.exec(output)) !== null) {
+        // This is necessary to avoid infinite loops with zero-width matches
+        if (m.index === regex.lastIndex) {
+            regex.lastIndex++;
+        }
+
+        let date = "";
+        let time = "";
+        let attr = "";
+        let size = 0;
+        let compressed = 0;
+        let name = "";
+
+        m.forEach((match, groupIndex) => {
+            switch (groupIndex) {
+                case 1:
+                    date = match;
+                    break;
+                case 2:
+                    time = match;
+                    break;
+                case 3:
+                    attr = match.replace(/\./g, '');
+                    break;
+                case 4:
+                    size = match;
+                    break;
+                case 5:
+                    compressed = match;
+                    break;
+                case 6:
+                    name = match;
+
+                    result.push({
+                        date: date,
+                        time: time,
+                        attr: attr,
+                        size: size,
+                        compressed: compressed,
+                        name: name,
+                    });
+                    break;
+            }
+        });
+    }
+    return result;
+}
+
+exports.unpack = unpack;
+exports.pack = pack;
+exports.list = list;
+exports.cmd = cmd;
 
 
 /***/ })

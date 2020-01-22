@@ -1,13 +1,12 @@
-name: 'Wait'
-description: 'Wait a designated number of milliseconds'
+name: 'create-7z-action'
+description: 'Create 7z Archive using GitHub Actions'
 inputs:
-  milliseconds:  # id of input
-    description: 'number of milliseconds to wait'
+  pathSource:
+    description: 'file/folder path to compress'
     required: true
-    default: '1000'
-outputs:
-  time: # output will be available to future steps 
-    description: 'The message to output'
+  pathTarget:
+    description: '7z archive path to write'
+    required: true
 runs:
   using: 'node12'
   main: 'dist/index.js'

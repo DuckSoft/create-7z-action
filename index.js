@@ -1,18 +1,22 @@
 const core = require('@actions/core');
-const wait = require('./wait');
+const _7z =  require('7zip-min');
 
-
-// most @actions toolkit packages have async methods
 async function run() {
   try { 
-    const ms = core.getInput('milliseconds');
-    console.log(`Waiting ${ms} milliseconds ...`)
+    const source = core.getInput('pathSource');
+    const target = core.getInput('pathTarget');
 
-    core.debug((new Date()).toTimeString())
-    wait(parseInt(ms));
-    core.debug((new Date()).toTimeString())
+    core.info("packing " + source + " into " + target);
+    const err = await new Promise((resolve, _) => {
+      _7z.pack(source, target, function(e) {
+        resolve(e);
+      });
+    });
 
-    core.setOutput('time', new Date().toTimeString());
+    if (err !== null) {
+      core.setFailed("create 7z archive failed: " + err);
+      return;
+    }
   } 
   catch (error) {
     core.setFailed(error.message);
