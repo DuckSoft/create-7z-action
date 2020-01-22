@@ -1,5 +1,7 @@
 name: 'create-7z-action'
 description: 'Create 7z Archive using GitHub Actions'
+icon: archive
+color: red
 inputs:
   pathSource:
     description: 'file/folder path to compress'
